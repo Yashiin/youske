@@ -1,0 +1,6 @@
+{
+  "name": "Yosuke: The Last Battle",
+  "description": "A 2D dark fantasy pixel art hack and slash platformer featuring dynamic sword combat, parry counterattacks, challenging demon archetypes, and an epic narrative boss encounter.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

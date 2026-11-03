@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .pixelated {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
+  .font-pixel {
+    font-family: 'Press Start 2P', 'Courier New', Courier, monospace;
+  }
+  .font-cinzel {
+    font-family: 'Cinzel', 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
+  }
+  .font-medieval {
+    font-family: 'MedievalSharp', 'Palatino Linotype', 'Book Antiqua', serif;
+  }
+}
+
+/* Custom scrollbars and canvas smoothing reset */
+canvas {
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+}
