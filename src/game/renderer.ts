@@ -24,6 +24,10 @@ import {
   PixelSprite,
 } from './pixelArt';
 import { goldenKnightManager } from './goldenKnightSprites';
+import { ashGhoulAtlas } from './ashGhoulSprites';
+import { oniWarriorAtlas } from './oniWarriorSprites';
+import { heavyDemonAtlas } from './heavyDemonSprites';
+import { agileDemonAtlas } from './agileDemonSprites';
 
 export class GameRenderer {
   public cameraX: number = 0;
@@ -697,28 +701,75 @@ export class GameRenderer {
     }
 
     // Pick sprite frame based on state safely
-    let sprite: PixelSprite | undefined;
+    let sprite: PixelSprite | { canvas: HTMLCanvasElement; originX: number; originY: number } | null | undefined;
     const isAttacking = enemy.state === 'attack';
     const isBlocking = enemy.isBlocking;
     const isHurt = enemy.state === 'hurt' || enemy.state === 'staggered';
 
     if (enemy.type === 'basic_monster') {
-      const frames = enemyAtlas.ghoulFrames;
-      const f = isAttacking ? 2 : isHurt ? 3 : Math.abs(Math.floor(this.globalTime * 6)) % Math.max(1, frames.length);
-      sprite = frames[f] || frames[0];
+      const ghoulFrame = ashGhoulAtlas.getFrame(
+        enemy.state,
+        enemy.stateTimer,
+        this.globalTime,
+        enemy.vx,
+        enemy.animDistanceTraveled || 0
+      );
+      if (ghoulFrame) {
+        sprite = ghoulFrame;
+      } else {
+        const frames = enemyAtlas.ghoulFrames;
+        const f = isAttacking ? 2 : isHurt ? 3 : Math.abs(Math.floor(this.globalTime * 6)) % Math.max(1, frames.length);
+        sprite = frames[f] || frames[0];
+      }
     } else if (enemy.type === 'demon_warrior') {
-      const frames = enemyAtlas.warriorFrames;
-      const f = isBlocking ? 3 : isAttacking ? 2 : isHurt ? 3 : Math.abs(Math.floor(this.globalTime * 5)) % Math.max(1, frames.length);
-      sprite = frames[f] || frames[0];
+      const oniFrame = oniWarriorAtlas.getFrame(
+        enemy.state,
+        enemy.stateTimer,
+        this.globalTime,
+        enemy.isBlocking,
+        enemy.vx,
+        enemy.animDistanceTraveled || 0
+      );
+      if (oniFrame) {
+        sprite = oniFrame;
+      } else {
+        const frames = enemyAtlas.warriorFrames;
+        const f = isBlocking ? 3 : isAttacking ? 2 : isHurt ? 3 : Math.abs(Math.floor(this.globalTime * 5)) % Math.max(1, frames.length);
+        sprite = frames[f] || frames[0];
+      }
     } else if (enemy.type === 'heavy_demon') {
-      const frames = enemyAtlas.goliathFrames;
-      const f = isAttacking ? 2 : isHurt ? 3 : Math.abs(Math.floor(this.globalTime * 4)) % Math.max(1, frames.length);
-      sprite = frames[f] || frames[0];
+      const heavyFrame = heavyDemonAtlas.getFrame(
+        enemy.state,
+        enemy.stateTimer,
+        this.globalTime,
+        enemy.vx,
+        enemy.animDistanceTraveled || 0
+      );
+      if (heavyFrame) {
+        sprite = heavyFrame;
+      } else {
+        const frames = enemyAtlas.goliathFrames;
+        const f = isAttacking ? 2 : isHurt ? 3 : Math.abs(Math.floor(this.globalTime * 4)) % Math.max(1, frames.length);
+        sprite = frames[f] || frames[0];
+      }
     } else {
-      // Agile Demon or fallback
-      const frames = enemyAtlas.wraithFrames;
-      const f = isAttacking ? 2 : isHurt ? 3 : Math.abs(Math.floor(this.globalTime * 6)) % Math.max(1, frames.length);
-      sprite = frames[f] || frames[0];
+      // Agile Demon (Espectro Asesino) or fallback
+      const agileFrame = agileDemonAtlas.getFrame(
+        enemy.state,
+        enemy.stateTimer,
+        this.globalTime,
+        enemy.vx,
+        enemy.vy,
+        enemy.isGrounded,
+        enemy.animDistanceTraveled || 0
+      );
+      if (agileFrame) {
+        sprite = agileFrame;
+      } else {
+        const frames = enemyAtlas.wraithFrames;
+        const f = isAttacking ? 2 : isHurt ? 3 : Math.abs(Math.floor(this.globalTime * 6)) % Math.max(1, frames.length);
+        sprite = frames[f] || frames[0];
+      }
     }
 
     // Safety fallback
@@ -742,6 +793,8 @@ export class GameRenderer {
 
   private renderEnemyTelegraph(ctx: CanvasRenderingContext2D, enemy: Enemy): void {
     ctx.save();
+    // Un-flip scale so text is never mirrored when enemy faces left (-1)
+    ctx.scale(enemy.facing, 1);
     const isUnblockable = enemy.telegraphType === 'unblockable';
     const progress = 1 - enemy.telegraphTimer / enemy.telegraphDuration;
 

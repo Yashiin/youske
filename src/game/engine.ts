@@ -1107,8 +1107,8 @@ export class GameEngine {
       vx: 0,
       vy: 0,
       facing: -1,
-      width: isHeavy ? 44 : isWarrior ? 32 : isAgile ? 26 : 28,
-      height: isHeavy ? 68 : isWarrior ? 54 : isAgile ? 46 : 38,
+      width: isHeavy ? 44 : isWarrior ? 36 : isAgile ? 26 : 38,
+      height: isHeavy ? 68 : isWarrior ? 56 : isAgile ? 46 : 42,
       hp: scaledHp,
       maxHp: scaledHp,
       state: 'patrol',
@@ -1125,8 +1125,9 @@ export class GameEngine {
       patrolStartX: x,
       patrolRange: isHeavy ? 120 : 180,
       aggroDistance: Math.round(baseAggro * diffCfg.aggroMult),
-      attackDistance: isHeavy ? 95 : isWarrior ? 78 : isAgile ? 95 : 62,
+      attackDistance: isHeavy ? 95 : isWarrior ? 78 : isAgile ? 95 : 70,
       dodgeCooldown: 0,
+      animDistanceTraveled: 0,
     };
   }
 
@@ -1385,6 +1386,13 @@ export class GameEngine {
       enemy.vy += this.GRAVITY * dt;
       enemy.x += enemy.vx * dt;
       enemy.y += enemy.vy * dt;
+
+      // Track distance traveled by velocity vector for footstep/animation synchronization
+      if (enemy.animDistanceTraveled !== undefined) {
+        enemy.animDistanceTraveled += Math.abs(enemy.vx) * dt;
+      } else {
+        enemy.animDistanceTraveled = Math.abs(enemy.vx) * dt;
+      }
 
       // Enemy platform landing & spike hazard check
       enemy.isGrounded = false;

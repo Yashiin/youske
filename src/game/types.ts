@@ -105,6 +105,7 @@ export interface Enemy {
   aggroDistance: number;
   attackDistance: number;
   dodgeCooldown?: number;
+  animDistanceTraveled?: number;
 }
 
 export interface BossData {

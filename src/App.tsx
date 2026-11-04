@@ -14,6 +14,7 @@ import { PauseModal } from './components/PauseModal';
 import { GameOverModal } from './components/GameOverModal';
 import { EndPrologueModal } from './components/EndPrologueModal';
 import { ControlsModal } from './components/ControlsModal';
+import { BestiaryModal } from './components/BestiaryModal';
 import { CinematicDialogueBox } from './components/CinematicDialogueBox';
 
 export default function App() {
@@ -42,6 +43,7 @@ export default function App() {
   const [bossData, setBossData] = useState<BossData | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isControlsOpen, setIsControlsOpen] = useState(false);
+  const [isBestiaryOpen, setIsBestiaryOpen] = useState(false);
   const [stageName, setStageName] = useState('Chapter I: The Ashen Forest');
 
   // Initialize Engine & Renderer
@@ -156,8 +158,16 @@ export default function App() {
       const engine = engineRef.current;
       if (!engine) return;
 
-      // Title screen Enter / Space to start (respects selected stage & difficulty in TitleScreen)
-      if (engine.state === 'title' && (e.code === 'Enter' || e.code === 'Space')) {
+      // Title screen Enter / Space to start (only when no modal dialog is open)
+      if (
+        engine.state === 'title' &&
+        (e.code === 'Enter' || e.code === 'Space') &&
+        !document.querySelector('[role="dialog"]')
+      ) {
+        const activeEl = document.activeElement as HTMLElement | null;
+        if (activeEl && activeEl.tagName === 'BUTTON' && !activeEl.dataset.start) {
+          return;
+        }
         e.preventDefault();
         const startBtn = document.querySelector<HTMLButtonElement>('button[data-start="true"]');
         if (startBtn) {
@@ -307,6 +317,7 @@ export default function App() {
         <TitleScreen
           onStart={handleStartGame}
           onOpenControls={() => setIsControlsOpen(true)}
+          onOpenBestiary={() => setIsBestiaryOpen(true)}
           isMuted={isMuted}
           onToggleMute={handleToggleMute}
           difficulty={difficulty}
@@ -349,6 +360,14 @@ export default function App() {
       <ControlsModal
         isOpen={isControlsOpen}
         onClose={() => setIsControlsOpen(false)}
+      />
+
+      {/* Demonic Bestiary Modal */}
+      <BestiaryModal
+        isOpen={isBestiaryOpen}
+        onClose={() => setIsBestiaryOpen(false)}
+        difficulty={difficulty}
+        onChangeDifficulty={handleChangeDifficulty}
       />
     </div>
   );

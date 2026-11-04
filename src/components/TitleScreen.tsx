@@ -1,11 +1,12 @@
 import React from 'react';
-import { Volume2, VolumeX, Shield, Swords, Sparkles, Play, Flame } from 'lucide-react';
+import { Volume2, VolumeX, BookOpen, Play, Flame } from 'lucide-react';
 import { Difficulty } from '../game/types';
 import { DIFFICULTY_SETTINGS } from '../game/combat';
 
 interface TitleScreenProps {
   onStart: (stageIdx?: number, difficulty?: Difficulty) => void;
   onOpenControls: () => void;
+  onOpenBestiary: () => void;
   isMuted: boolean;
   onToggleMute: () => void;
   difficulty: Difficulty;
@@ -15,6 +16,7 @@ interface TitleScreenProps {
 export const TitleScreen: React.FC<TitleScreenProps> = ({
   onStart,
   onOpenControls,
+  onOpenBestiary,
   isMuted,
   onToggleMute,
   difficulty,
@@ -93,6 +95,15 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
           >
             <Play size={16} className="fill-white group-hover:scale-110 transition-transform" />
             <span>START PROLOGUE</span>
+          </button>
+
+          <button
+            data-bestiary="true"
+            onClick={onOpenBestiary}
+            className="w-full sm:w-auto px-6 py-3.5 bg-neutral-900/90 hover:bg-neutral-800 text-neutral-200 hover:text-white font-mono text-xs tracking-wider border border-neutral-700 hover:border-red-500/70 shadow-md transition-colors flex items-center justify-center gap-2"
+          >
+            <BookOpen size={15} className="text-red-500" />
+            <span>BESTIARY</span>
           </button>
 
           <button
