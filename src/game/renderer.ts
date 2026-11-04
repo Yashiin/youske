@@ -837,17 +837,34 @@ export class GameRenderer {
   // --- GIANT FINAL BOSS: MALAKOR PIXEL ART ---
 
   private renderBoss(ctx: CanvasRenderingContext2D, boss: BossData): void {
-    ctx.save();
-    ctx.translate(Math.round(boss.x), Math.round(boss.y));
-
-    const isHurt = boss.hitFlashTimer > 0;
-    const isPhase2 = boss.phase === 2;
     const isPhase3 = boss.phase === 3 || boss.phase === 'scripted_defeat';
 
-    // Boss breathing offset
-    const breath = Math.sin(this.globalTime * 3) * 3;
+    // Boss breathing & walking stride offset
+    const speed = Math.abs(boss.vx || 0);
+    const strideBob = speed > 15 && boss.isGrounded !== false ? Math.sin(this.globalTime * 10) * 4 : 0;
+    const breath = Math.sin(this.globalTime * 3) * 3 + strideBob;
 
-    // 1. Draw Colossal Torso & Abyssal Core
+    // 1. Render Boss Body in Local (Facing-Aware) Coordinates
+    ctx.save();
+    ctx.translate(Math.round(boss.x), Math.round(boss.y));
+    // Native boss procedural art faces left (-1); flip horizontally when facing right (+1)
+    if (boss.facing === 1) {
+      ctx.scale(-1, 1);
+    }
+
+    // Underfoot anti-camping charge warning ring when player stays underneath him
+    if ((boss.underfootTimer || 0) > 1.0 && boss.phase !== 'scripted_defeat') {
+      const chargeRatio = Math.min(1, (boss.underfootTimer || 0) / 5.0);
+      ctx.save();
+      ctx.strokeStyle = `rgba(239, 68, 68, ${0.35 + chargeRatio * 0.6})`;
+      ctx.lineWidth = 2 + Math.round(chargeRatio * 3);
+      ctx.beginPath();
+      ctx.ellipse(0, -4, Math.round(145 * chargeRatio), 10, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Colossal Torso & Abyssal Core
     const torso = bossAtlas.torsoSprite;
     if (torso && torso.canvas) {
       ctx.drawImage(
@@ -857,7 +874,7 @@ export class GameRenderer {
       );
     }
 
-    // 2. Draw Head & Ram Horns
+    // Head & Ram Horns
     const head = bossAtlas.headSprite;
     if (head && head.canvas) {
       ctx.drawImage(
@@ -874,8 +891,8 @@ export class GameRenderer {
       ctx.fillRect(Math.round(-18 + (e % 2) * 32), Math.round(ey), 3, 3);
     }
 
-    // 3. Attack Visuals (Slam fist / Greatsword)
-    if (boss.currentAttack === 'slam') {
+    // Attack Visuals (Slam fist / Greatsword / Leap Crush)
+    if (boss.currentAttack === 'slam' || boss.currentAttack === 'leap_crush') {
       // Massive fist smash
       ctx.fillStyle = PALETTE.bossObsidianDark;
       ctx.fillRect(-140, -150 + breath, 55, 150);
@@ -904,38 +921,60 @@ export class GameRenderer {
       ctx.lineTo(-190, -20);
       ctx.stroke();
     } else {
-      // Resting arms
+      // Resting / Striding arms
       ctx.fillStyle = PALETTE.bossObsidianDark;
       ctx.fillRect(-125, -190 + breath, 45, 150);
-      ctx.fillRect(80, -190 + breath, 45, 150);
+      ctx.fillRect(80, -190 - breath * 0.5, 45, 150);
     }
+    ctx.restore();
 
-    // 4. Ground Shockwaves
+    // 2. Render Ground Shockwaves & Directed Projectiles in World Space
+    ctx.save();
     for (const sw of boss.shockwaves) {
+      const sx = Math.round(sw.x);
+      const sy = Math.round(sw.y);
       ctx.fillStyle = 'rgba(239, 68, 68, 0.9)';
-      ctx.fillRect(Math.round(sw.x - boss.x), Math.round(sw.y - boss.y), sw.width, sw.height);
+      ctx.fillRect(sx, sy, sw.width, sw.height);
       ctx.fillStyle = '#ffffff';
-      ctx.fillRect(Math.round(sw.x - boss.x), Math.round(sw.y - boss.y), Math.round(sw.width * 0.35), sw.height);
+      const leadX = sw.vx >= 0 ? sx + Math.round(sw.width * 0.65) : sx;
+      ctx.fillRect(leadX, sy, Math.round(sw.width * 0.35), sw.height);
     }
 
-    // 5. Boss Projectiles (Meteors & Beams)
     for (const p of boss.projectiles) {
-      const px = Math.round(p.x - boss.x);
-      const py = Math.round(p.y - boss.y);
+      const px = Math.round(p.x);
+      const py = Math.round(p.y);
       if (p.type === 'meteor') {
         const m = bossAtlas.bloodMeteorSprite;
         if (m && m.canvas) {
           ctx.drawImage(m.canvas, px - m.originX, py - m.originY);
         }
-      } else if (p.type === 'beam') {
-        // Devastating Abyssal Beam
-        ctx.fillStyle = 'rgba(168, 85, 247, 0.95)';
-        ctx.fillRect(-700, py - 18, 800, 36);
+      } else if (p.type === 'orb') {
+        // Directed Abyssal Soul-Fire Orb
+        ctx.fillStyle = 'rgba(225, 29, 72, 0.35)';
+        ctx.beginPath();
+        ctx.arc(px, py, p.radius + 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#f43f5e';
+        ctx.beginPath();
+        ctx.arc(px, py, p.radius, 0, Math.PI * 2);
+        ctx.fill();
+
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(-700, py - 6, 800, 12);
+        ctx.beginPath();
+        ctx.arc(px, py, Math.max(4, Math.round(p.radius * 0.45)), 0, Math.PI * 2);
+        ctx.fill();
+      } else if (p.type === 'beam') {
+        // Aimed Abyssal Beam in direction of protagonist
+        const bWidth = p.beamWidth || 780;
+        const bDir = p.dir || -1;
+        const startX = bDir === 1 ? px : px - bWidth;
+        ctx.fillStyle = 'rgba(168, 85, 247, 0.95)';
+        ctx.fillRect(startX, py - 18, bWidth, 36);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(startX, py - 6, bWidth, 12);
       }
     }
-
     ctx.restore();
   }
 

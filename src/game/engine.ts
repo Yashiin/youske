@@ -290,6 +290,15 @@ export class GameEngine {
         maxHp: scaledBossHp,
         x: 1150,
         y: 620,
+        vx: 0,
+        vy: 0,
+        facing: -1,
+        isGrounded: true,
+        underfootTimer: 0,
+        moveTargetX: 900,
+        pendingAttackTimer: 0,
+        attackTargetX: 180,
+        attackTargetY: 550,
         actionTimer: 2.0 * diffCfg.cooldownMult,
         currentAttack: 'idle',
         hitFlashTimer: 0,
@@ -1597,7 +1606,7 @@ export class GameEngine {
     }
   }
 
-  // --- GIANT FINAL BOSS AI & ATTACK CYCLES ---
+  // --- GIANT FINAL BOSS AI, MOVEMENT & DIRECTED ATTACK CYCLES ---
 
   private updateBoss(dt: number): void {
     const boss = this.boss;
@@ -1607,6 +1616,88 @@ export class GameEngine {
     boss.actionTimer -= dt;
 
     const p = this.player;
+    const diffCfg = getDifficultyConfig(this.difficulty);
+
+    // Ensure optional movement fields are initialized
+    if (boss.vx === undefined) boss.vx = 0;
+    if (boss.vy === undefined) boss.vy = 0;
+    if (boss.facing === undefined) boss.facing = -1;
+    if (boss.isGrounded === undefined) boss.isGrounded = true;
+    if (boss.underfootTimer === undefined) boss.underfootTimer = 0;
+    if (boss.pendingAttackTimer === undefined) boss.pendingAttackTimer = 0;
+
+    if (boss.phase !== 'scripted_defeat') {
+      const dxToPlayer = p.x - boss.x;
+      const absDx = Math.abs(dxToPlayer);
+      const dirToPlayer: 1 | -1 = dxToPlayer >= 0 ? 1 : -1;
+
+      // Always orient toward Yosuke unless locked in mid-leap
+      if (boss.isGrounded && boss.currentAttack !== 'leap_crush') {
+        boss.facing = dirToPlayer;
+      }
+
+      // 1. Track time protagonist spends underneath / right at Malakor's feet
+      if (absDx <= 165) {
+        boss.underfootTimer += dt;
+      } else {
+        boss.underfootTimer = Math.max(0, boss.underfootTimer - dt * 0.35);
+      }
+
+      // 2. Every 5 seconds the protagonist stays underneath Malakor, trigger Abyssal Reposition Leap!
+      if (boss.underfootTimer >= 5.0 && boss.isGrounded) {
+        boss.underfootTimer = 0;
+        this.triggerBossUnderfootReposition();
+      }
+
+      // 3. Continuous Boss Movement across the arena
+      if (boss.isGrounded && boss.currentAttack !== 'leap_crush') {
+        const phaseSpeedMult = boss.phase === 3 ? 1.35 : boss.phase === 2 ? 1.18 : 1.0;
+        const baseMoveSpeed = 125 * diffCfg.speedMult * phaseSpeedMult;
+
+        if (boss.currentAttack === 'cleave' && boss.pendingAttackTimer > 0) {
+          // Lunging charge toward locked player position during Cleave windup
+          boss.vx = boss.facing * baseMoveSpeed * 2.1;
+        } else if (absDx > 260) {
+          // Stalk toward protagonist so he actively pursues across the entire arena
+          boss.vx = dirToPlayer * baseMoveSpeed;
+        } else if (absDx < 135) {
+          // Step back or strafe away to prevent trivial underfoot camping
+          const retreatDir: 1 | -1 =
+            boss.x > 1220 ? -1 : boss.x < 320 ? 1 : (-dirToPlayer as 1 | -1);
+          boss.vx = retreatDir * (baseMoveSpeed * 0.95);
+        } else {
+          // Active combat weaving at mid-range
+          const weaveDir = Math.sin(this.stats.comboTimer * 3 + boss.actionTimer * 2.5) >= 0 ? 1 : -1;
+          boss.vx = weaveDir * (baseMoveSpeed * 0.65);
+        }
+      }
+
+      // Apply horizontal & vertical physics to Malakor
+      boss.x += boss.vx * dt;
+      if (!boss.isGrounded || boss.vy !== 0) {
+        boss.vy += this.GRAVITY * dt;
+        boss.y += boss.vy * dt;
+        if (boss.y >= 620) {
+          boss.y = 620;
+          boss.vy = 0;
+          boss.isGrounded = true;
+          if (boss.currentAttack === 'leap_crush') {
+            this.resolveBossLeapLanding();
+          }
+        }
+      }
+
+      // Clamp Malakor inside the throne room bounds
+      boss.x = Math.max(240, Math.min(1340, boss.x));
+
+      // Resolve pending attack windup deterministically via dt
+      if (boss.pendingAttackTimer > 0) {
+        boss.pendingAttackTimer -= dt;
+        if (boss.pendingAttackTimer <= 0) {
+          this.resolvePendingBossAttack();
+        }
+      }
+    }
 
     // Check boss shockwaves moving across the floor
     for (let i = boss.shockwaves.length - 1; i >= 0; i--) {
@@ -1614,7 +1705,6 @@ export class GameEngine {
       sw.x += sw.vx * dt;
       sw.duration -= dt;
 
-      // Collision with player
       const playerRect: Rect = {
         x: p.x - p.width / 2,
         y: p.y - p.height,
@@ -1630,8 +1720,8 @@ export class GameEngine {
       };
 
       if (rectsOverlap(playerRect, swRect) && !p.isInvulnerable) {
-        // Shockwaves are unblockable (must be jumped over!)
-        this.damagePlayer(sw.damage, 'boss_shockwave', { x: -280, y: -240 });
+        const knockDir = sw.vx >= 0 ? 1 : -1;
+        this.damagePlayer(sw.damage, 'boss_shockwave', { x: knockDir * 280, y: -240 });
       }
 
       if (sw.duration <= 0) {
@@ -1639,7 +1729,7 @@ export class GameEngine {
       }
     }
 
-    // Check boss projectiles
+    // Check boss projectiles (Meteors, Directed Orbs & Aimed Beams)
     for (let i = boss.projectiles.length - 1; i >= 0; i--) {
       const proj = boss.projectiles[i];
       proj.x += proj.vx * dt;
@@ -1653,21 +1743,38 @@ export class GameEngine {
         h: p.height,
       };
 
-      const projRect: Rect = {
-        x: proj.x - proj.radius,
-        y: proj.y - proj.radius,
-        w: proj.radius * 2,
-        h: proj.radius * 2,
-      };
-
-      if (rectsOverlap(playerRect, projRect) && !p.isInvulnerable) {
-        this.damagePlayer(proj.damage, 'boss_meteor', { x: -180, y: -160 });
-        boss.projectiles.splice(i, 1);
-        continue;
+      let projRect: Rect;
+      if (proj.type === 'beam') {
+        const bWidth = proj.beamWidth || 750;
+        const bDir = proj.dir || -1;
+        projRect = {
+          x: bDir === 1 ? proj.x : proj.x - bWidth,
+          y: proj.y - proj.radius,
+          w: bWidth,
+          h: proj.radius * 2,
+        };
+      } else {
+        projRect = {
+          x: proj.x - proj.radius,
+          y: proj.y - proj.radius,
+          w: proj.radius * 2,
+          h: proj.radius * 2,
+        };
       }
 
-      if (proj.duration <= 0 || proj.y >= 620) {
-        this.spawnExplosion(proj.x, proj.y);
+      if (rectsOverlap(playerRect, projRect) && !p.isInvulnerable) {
+        const knockDir = p.x >= boss.x ? 1 : -1;
+        this.damagePlayer(proj.damage, `boss_${proj.type}`, { x: knockDir * 220, y: -160 });
+        if (proj.type !== 'beam') {
+          boss.projectiles.splice(i, 1);
+          continue;
+        }
+      }
+
+      if (proj.duration <= 0 || (proj.type !== 'beam' && proj.y >= 620)) {
+        if (proj.type !== 'beam') {
+          this.spawnExplosion(proj.x, Math.min(620, proj.y));
+        }
         boss.projectiles.splice(i, 1);
       }
     }
@@ -1680,103 +1787,274 @@ export class GameEngine {
     if (this.onBossUpdate) this.onBossUpdate(this.boss);
   }
 
+  /**
+   * Triggered when the protagonist remains underneath Malakor for 5 seconds.
+   * Unleashes an immediate repulsion blast at his feet and leaps across the arena.
+   */
+  private triggerBossUnderfootReposition(): void {
+    const boss = this.boss;
+    if (!boss) return;
+
+    const p = this.player;
+    audio.playBossRoar();
+    this.screenShakeRequest = 20;
+
+    // Immediate underfoot blast if player is camping beneath him
+    if (Math.abs(p.x - boss.x) <= 170 && !p.isInvulnerable) {
+      const pushDir = p.x >= boss.x ? 1 : -1;
+      this.damagePlayer(32, 'boss_underfoot_blast', { x: pushDir * 360, y: -260 });
+    }
+    this.spawnParticleRing(boss.x, boss.y - 60, '#ef4444', 32);
+
+    // Choose destination on the opposite side of the arena
+    const destX =
+      boss.x > 750
+        ? Math.max(300, boss.x - 520)
+        : Math.min(1260, boss.x + 520);
+
+    boss.moveTargetX = destX;
+    boss.currentAttack = 'leap_crush';
+    boss.pendingAttackTimer = 0;
+    boss.actionTimer = 1.8;
+    boss.isGrounded = false;
+    boss.vy = -520;
+    // Flight time with vy = -520 and GRAVITY = 1200 is ~0.866s
+    boss.vx = (destX - boss.x) / 0.86;
+    boss.facing = destX >= boss.x ? 1 : -1;
+  }
+
+  private resolveBossLeapLanding(): void {
+    const boss = this.boss;
+    if (!boss) return;
+
+    const p = this.player;
+    boss.vx = 0;
+    boss.currentAttack = 'slam';
+    boss.facing = p.x >= boss.x ? 1 : -1;
+    this.screenShakeRequest = 22;
+    audio.playShockwave();
+    this.spawnParticleRing(boss.x, 610, '#f43f5e', 30);
+
+    // Direct landing crush check
+    if (Math.abs(p.x - boss.x) <= 145 && p.y >= 490 && !p.isInvulnerable) {
+      const pushDir = p.x >= boss.x ? 1 : -1;
+      this.damagePlayer(42, 'boss_leap_crush', { x: pushDir * 380, y: -250 });
+    }
+
+    // Dual shockwaves radiating left and right from landing impact
+    boss.shockwaves.push(
+      {
+        id: `sw-leap-l-${Date.now()}`,
+        x: boss.x - 80,
+        y: 590,
+        vx: -380,
+        width: 48,
+        height: 35,
+        damage: 35,
+        duration: 3.5,
+      },
+      {
+        id: `sw-leap-r-${Date.now()}`,
+        x: boss.x + 35,
+        y: 590,
+        vx: 380,
+        width: 48,
+        height: 35,
+        damage: 35,
+        duration: 3.5,
+      }
+    );
+
+    // Fire a directed abyssal orb right at Yosuke after landing
+    this.spawnDirectedBossOrb(boss.x, boss.y - 120, p.x, p.y - p.height * 0.5, 360, 30);
+  }
+
+  private spawnDirectedBossOrb(
+    startX: number,
+    startY: number,
+    targetX: number,
+    targetY: number,
+    speed: number,
+    damage: number
+  ): void {
+    if (!this.boss) return;
+    const dx = targetX - startX;
+    const dy = targetY - startY;
+    const dist = Math.max(1, Math.hypot(dx, dy));
+    this.boss.projectiles.push({
+      id: `orb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      x: startX,
+      y: startY,
+      vx: (dx / dist) * speed,
+      vy: (dy / dist) * speed,
+      radius: 16,
+      damage,
+      type: 'orb',
+      duration: 3.2,
+    });
+  }
+
   private executeBossAttack(): void {
     const boss = this.boss;
     if (!boss) return;
+
+    const p = this.player;
+    const diffCfg = getDifficultyConfig(this.difficulty);
+    const dirToPlayer: 1 | -1 = p.x >= boss.x ? 1 : -1;
+    boss.facing = dirToPlayer;
+    boss.attackTargetX = p.x;
+    boss.attackTargetY = p.y - p.height * 0.5;
 
     const attacks =
       boss.phase === 1
         ? ['slam', 'cleave']
         : boss.phase === 2
-        ? ['slam', 'meteor', 'beam']
+        ? ['slam', 'cleave', 'meteor', 'beam']
         : ['slam', 'cleave', 'meteor', 'beam'];
 
-    const pick = attacks[Math.floor(Math.random() * attacks.length)];
+    // Prefer cleave when player is close, or ranged/slam when further
+    const absDx = Math.abs(p.x - boss.x);
+    let pick = attacks[Math.floor(Math.random() * attacks.length)];
+    if (absDx < 190 && Math.random() < 0.55) {
+      pick = 'cleave';
+    }
+
     boss.currentAttack = pick;
 
     if (pick === 'slam') {
-      // Tremor Slam: Colossal ground strike launching shockwaves
-      boss.actionTimer = 2.4;
+      boss.actionTimer = 2.2 * diffCfg.cooldownMult;
+      boss.pendingAttackTimer = 0.45 * diffCfg.windupMult;
       audio.playBossRoar();
-      setTimeout(() => {
-        if (!this.boss) return;
-        this.screenShakeRequest = 18;
-        audio.playShockwave();
-        // Spawn ground shockwave moving left toward player
-        this.boss.shockwaves.push({
-          id: `sw-${Date.now()}`,
-          x: this.boss.x - 120,
-          y: 590,
-          vx: -360,
-          width: 45,
-          height: 35,
-          damage: 35,
-          duration: 3.5,
-        });
-      }, 500);
     } else if (pick === 'cleave') {
-      // Hellfire Cleave
-      boss.actionTimer = 2.2;
+      boss.actionTimer = 2.0 * diffCfg.cooldownMult;
+      boss.pendingAttackTimer = 0.38 * diffCfg.windupMult;
       audio.playSwordSwing('heavy');
-      setTimeout(() => {
-        if (!this.boss) return;
-        this.screenShakeRequest = 12;
-        // Hitbox across the lower floor
-        const playerRect: Rect = {
-          x: this.player.x - this.player.width / 2,
-          y: this.player.y - this.player.height,
-          w: this.player.width,
-          h: this.player.height,
-        };
-        const cleaveRect: Rect = {
-          x: this.boss.x - 220,
-          y: 540,
-          w: 220,
-          h: 80,
-        };
-        if (rectsOverlap(playerRect, cleaveRect) && !this.player.isInvulnerable) {
-          this.damagePlayer(40, 'boss_cleave', { x: -350, y: -160 });
-        }
-      }, 400);
     } else if (pick === 'meteor') {
-      // Blood Meteor Rain
-      boss.actionTimer = 3.2;
+      boss.actionTimer = 2.8 * diffCfg.cooldownMult;
+      boss.pendingAttackTimer = 0.25 * diffCfg.windupMult;
       audio.playMeteor();
-      for (let i = 0; i < 4; i++) {
-        setTimeout(() => {
-          if (!this.boss) return;
-          this.boss.projectiles.push({
-            id: `meteor-${Date.now()}-${i}`,
-            x: 200 + Math.random() * 800,
-            y: 50,
-            vx: -50 + Math.random() * 100,
-            vy: 320,
-            radius: 18,
-            damage: 30,
-            type: 'meteor',
-            duration: 3.0,
-          });
-        }, i * 350);
-      }
     } else if (pick === 'beam') {
-      // Abyssal Laser Beam
-      boss.actionTimer = 2.8;
+      boss.actionTimer = 2.5 * diffCfg.cooldownMult;
+      boss.pendingAttackTimer = 0.50 * diffCfg.windupMult;
       audio.playBeam();
-      this.screenShakeRequest = 15;
-      setTimeout(() => {
-        if (!this.boss) return;
-        this.boss.projectiles.push({
-          id: `beam-${Date.now()}`,
-          x: this.boss.x - 300,
-          y: 560,
-          vx: 0,
-          vy: 0,
-          radius: 25,
-          damage: 45,
-          type: 'beam',
-          duration: 0.8,
+      this.screenShakeRequest = 14;
+    }
+  }
+
+  private resolvePendingBossAttack(): void {
+    const boss = this.boss;
+    if (!boss || boss.phase === 'scripted_defeat') return;
+
+    const p = this.player;
+    const dir: 1 | -1 = p.x >= boss.x ? 1 : -1;
+    boss.facing = dir;
+
+    if (boss.currentAttack === 'slam') {
+      this.screenShakeRequest = 18;
+      audio.playShockwave();
+
+      // Crush anyone standing right underneath Malakor
+      if (Math.abs(p.x - boss.x) <= 135 && p.y >= 500 && !p.isInvulnerable) {
+        this.damagePlayer(38, 'boss_slam_crush', { x: dir * 320, y: -220 });
+      }
+
+      // Primary shockwave directed toward protagonist
+      boss.shockwaves.push({
+        id: `sw-main-${Date.now()}`,
+        x: dir === 1 ? boss.x + 40 : boss.x - 85,
+        y: 590,
+        vx: dir * 380,
+        width: 48,
+        height: 35,
+        damage: 35,
+        duration: 3.5,
+      });
+
+      // Secondary rear shockwave to prevent safe backside camping
+      boss.shockwaves.push({
+        id: `sw-rear-${Date.now()}`,
+        x: dir === 1 ? boss.x - 85 : boss.x + 40,
+        y: 590,
+        vx: -dir * 290,
+        width: 42,
+        height: 32,
+        damage: 30,
+        duration: 2.8,
+      });
+    } else if (boss.currentAttack === 'cleave') {
+      this.screenShakeRequest = 14;
+      const playerRect: Rect = {
+        x: p.x - p.width / 2,
+        y: p.y - p.height,
+        w: p.width,
+        h: p.height,
+      };
+      // Sweeps across Malakor's feet AND 230px toward the protagonist
+      const cleaveRect: Rect = {
+        x: dir === 1 ? boss.x - 80 : boss.x - 230,
+        y: Math.min(520, Math.max(410, p.y - 75)),
+        w: 310,
+        h: 100,
+      };
+      if (rectsOverlap(playerRect, cleaveRect) && !p.isInvulnerable) {
+        this.damagePlayer(40, 'boss_cleave', { x: dir * 350, y: -160 });
+      }
+      // Also launch a directed abyssal slash orb toward protagonist
+      this.spawnDirectedBossOrb(
+        boss.x + dir * 60,
+        boss.y - 110,
+        p.x,
+        p.y - p.height * 0.5,
+        390,
+        28
+      );
+    } else if (boss.currentAttack === 'meteor') {
+      // 4 Blood Meteors aimed directly at protagonist's current & predicted trajectory
+      const offsets = [-90, 0, 90, 180 * (p.vx >= 0 ? 1 : -1)];
+      for (let i = 0; i < 4; i++) {
+        const targetX = Math.max(120, Math.min(1400, p.x + p.vx * 0.25 + offsets[i]));
+        const spawnX = Math.max(100, Math.min(1420, targetX - (dir * 110)));
+        const spawnY = 40 + i * 28;
+        const dx = targetX - spawnX;
+        const dy = Math.max(200, p.y - spawnY);
+        const fallTime = dy / 340;
+        boss.projectiles.push({
+          id: `meteor-${Date.now()}-${i}`,
+          x: spawnX,
+          y: spawnY,
+          vx: dx / fallTime,
+          vy: 340,
+          radius: 18,
+          damage: 30,
+          type: 'meteor',
+          duration: 3.2,
         });
-      }, 600);
+      }
+    } else if (boss.currentAttack === 'beam') {
+      this.screenShakeRequest = 16;
+      const aimY = Math.max(390, Math.min(585, p.y - p.height * 0.5));
+      boss.projectiles.push({
+        id: `beam-${Date.now()}`,
+        x: boss.x + dir * 60,
+        y: aimY,
+        vx: 0,
+        vy: 0,
+        radius: 24,
+        damage: 45,
+        type: 'beam',
+        duration: 0.85,
+        dir,
+        beamWidth: 780,
+      });
+      // Accompany beam with a directed orb aimed straight at Yosuke
+      this.spawnDirectedBossOrb(
+        boss.x + dir * 50,
+        boss.y - 140,
+        p.x,
+        p.y - p.height * 0.5,
+        350,
+        30
+      );
     }
   }
 
@@ -1793,6 +2071,11 @@ export class GameEngine {
         maxHp: 1200,
         x: 1150,
         y: 620,
+        vx: 0,
+        vy: 0,
+        facing: -1,
+        isGrounded: true,
+        underfootTimer: 0,
         actionTimer: 0,
         currentAttack: 'cleave',
         hitFlashTimer: 0,
@@ -1805,6 +2088,10 @@ export class GameEngine {
       };
     } else {
       this.boss.phase = 'scripted_defeat';
+      this.boss.vx = 0;
+      this.boss.vy = 0;
+      this.boss.y = 620;
+      this.boss.facing = -1;
     }
     this.state = 'prologue_ending';
     this.setDomState('prologue_ending');

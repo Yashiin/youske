@@ -116,6 +116,15 @@ export interface BossData {
   maxHp: number;
   x: number;
   y: number;
+  vx?: number;
+  vy?: number;
+  facing?: 1 | -1;
+  isGrounded?: boolean;
+  underfootTimer?: number;
+  moveTargetX?: number;
+  pendingAttackTimer?: number;
+  attackTargetX?: number;
+  attackTargetY?: number;
   actionTimer: number;
   currentAttack: string;
   hitFlashTimer: number;
@@ -137,6 +146,8 @@ export interface BossProjectile {
   damage: number;
   type: 'meteor' | 'orb' | 'beam';
   duration: number;
+  dir?: 1 | -1;
+  beamWidth?: number;
 }
 
 export interface Shockwave {

@@ -221,34 +221,34 @@ export const BESTIARY_ENTRIES: BestiaryEntry[] = [
     accentColor: '#e11d48',
     baseHp: 1200,
     baseDamage: 45,
-    chaseSpeed: 0,
+    chaseSpeed: 125,
     aggroDistance: 1500,
     windupSeconds: 0.50,
     dimensions: { width: 140, height: 180 },
     isUnblockable: true,
     canBlock: false,
     hasHyperArmor: true,
-    canEvade: false,
+    canEvade: true,
     lore: [
-      'Ancient sovereign of the Demonic Abyss who shattered the mortal realms beneath a bleeding eclipse. Enthroned within the obsidian sanctum, Malakor towers over fallen heroes as a six-horned titan of hellfire and despair.',
+      'Ancient sovereign of the Demonic Abyss who shattered the mortal realms beneath a bleeding eclipse. Enthroned within the obsidian sanctum, Malakor stalks across the throne room as a six-horned titan of hellfire and despair.',
       'Even pushed to the brink across three cataclysmic combat phases, his abyssal dominion remains absolute—shattering Yosuke’s Spirit Blade Aegis to herald the true war beyond the Prologue.',
     ],
     tacticalBehaviors: [
       {
-        name: 'Tremor Slam & Hellfire Cleave',
-        tag: 'Phase I · 100%–67% HP',
+        name: 'Abyssal Reposition Leap',
+        tag: '5s Anti-Camping Crush',
         description:
-          'Unleashes ground-hugging unblockable shockwaves (vx = -360) and sweeping 220px hellfire blade cleaves.',
+          'Actively stalks the arena and, if Yosuke stays underneath him for 5 seconds, detonates a repulsion blast and leaps across the sanctum with dual landing shockwaves.',
       },
       {
-        name: 'Blood Meteor Rain & Abyssal Beam',
-        tag: 'Phase II & III · <66% HP',
+        name: 'Directed Orbs, Meteors & Beam',
+        tag: 'Targeted Barrage',
         description:
-          'Calls down four explosive blood meteors from the eclipsed sky and fires a concentrated abyssal laser beam across the throne room.',
+          'Locks onto Yosuke’s position to launch predictive blood meteors, soul-fire orbs, lunging greatsword cleaves, and aimed abyssal laser beams.',
       },
     ],
     counterStrategy:
-      'Use elevated battle pillars to evade ground shockwaves and laser beams, weave between falling blood meteors with air dashes, and punish his core during recovery windows.',
+      'Never stay underneath Malakor for more than 5 seconds—watch the red charge ring at his feet, use elevated pillars to evade shockwaves, and punish his recovery windows.',
   },
 ];
 
