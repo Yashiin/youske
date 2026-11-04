@@ -87,6 +87,8 @@ describe('Blood & Soul Impact Particle System', () => {
 
     // Now test a Perfect Parry against an incoming enemy attack
     engine.particles = [];
+    engine.hitstopTimer = 0;
+    engine.keysHeld.add('KeyL');
     engine.player.action = 'block';
     engine.player.blockDuration = 0.05; // Within 0.22s parry window
     engine.player.isInvulnerable = false;

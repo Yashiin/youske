@@ -33,6 +33,7 @@ import {
 } from './combat';
 import { audio } from './audio';
 import { LEVELS } from './levels';
+import { createHitImpactParticles, createParryImpactParticles } from './impactParticles';
 
 export class GameEngine {
   public state: GameState = 'title';
@@ -255,6 +256,14 @@ export class GameEngine {
     this.damageNumbers = [];
     this.activePlayerHitbox = null;
 
+    this.resetLevelEnemies();
+    audio.setMusicMode(this.level.isBossStage ? 'boss' : 'ambient');
+  }
+
+  public resetLevelEnemies(): void {
+    const levelIdx = this.currentLevelIndex;
+    const diffCfg = getDifficultyConfig(this.difficulty);
+
     // Add bonus elite enemies on Hard / Nightmare difficulty
     const enemyConfigs = [...this.level.enemies];
     if (!this.level.isBossStage) {
@@ -295,11 +304,14 @@ export class GameEngine {
         facing: -1,
         isGrounded: true,
         underfootTimer: 0,
+        moveCycleTimer: 0,
         moveTargetX: 900,
         pendingAttackTimer: 0,
-        attackTargetX: 180,
-        attackTargetY: 550,
-        actionTimer: 2.0 * diffCfg.cooldownMult,
+        attackTargetX: undefined,
+        attackTargetY: undefined,
+        attackCycleCount: 0,
+        lastAttackMissed: false,
+        actionTimer: 2.4 * diffCfg.cooldownMult,
         currentAttack: 'idle',
         hitFlashTimer: 0,
         isVulnerable: true,
@@ -309,10 +321,8 @@ export class GameEngine {
         scriptedSequenceStep: 0,
         scriptedTimer: 0,
       };
-      audio.setMusicMode('boss');
     } else {
       this.boss = null;
-      audio.setMusicMode('ambient');
     }
 
     if (this.onBossUpdate) this.onBossUpdate(this.boss);
@@ -362,6 +372,10 @@ export class GameEngine {
     this.dialogueQueue = [];
     if (this.onDialogueUpdate) this.onDialogueUpdate(null);
 
+    // Reset and respawn all enemies (and boss on boss stage)
+    this.resetLevelEnemies();
+    this.activePlayerHitbox = null;
+
     // Find active checkpoint
     const cp = this.level.checkpoints.find((c) => c.activated) || {
       x: this.level.playerSpawn.x,
@@ -372,8 +386,17 @@ export class GameEngine {
     this.player.vx = 0;
     this.player.vy = 0;
     this.player.action = 'idle';
+    this.player.actionTimer = 0;
+    this.player.isInvulnerable = false;
+    this.player.invulnerabilityTimer = 0;
+    this.player.hitFlashTimer = 0;
+    this.player.counterWindowTimer = 0;
+    this.player.dashCooldown = 0;
+    this.player.hasAirDashed = false;
     this.stats.hp = this.stats.maxHp;
     this.stats.stamina = this.stats.maxStamina;
+    this.stats.comboCount = 0;
+    this.stats.comboTimer = 0;
     this.state = 'playing';
     this.setDomState('playing');
     audio.setMusicMode(this.level.isBossStage ? 'boss' : 'ambient');
@@ -977,6 +1000,16 @@ export class GameEngine {
     // Spawn blood & spark particles with tier-accented sparks
     this.spawnBloodParticles(enemy.x, enemy.y - enemy.height / 2, 14);
     this.spawnSparks(enemy.x, enemy.y - enemy.height / 2, 10, isCounter ? '#ef4444' : tierData.color);
+    this.particles.push(
+      ...createHitImpactParticles({
+        impactX: enemy.x,
+        impactY: enemy.y - enemy.height / 2,
+        attackDirection: this.player.facing,
+        isCrit: hitData.isCrit,
+        isCounter,
+        comboTier: tierData.tier,
+      })
+    );
 
     // Damage Number with world-space pop and scatter
     const textColor = isCounter ? '#ef4444' : hitData.isCrit ? '#f59e0b' : tierData.color;
@@ -1098,7 +1131,7 @@ export class GameEngine {
 
   // --- ENEMIES UPDATE & TACTICAL AI ---
 
-  private createEnemy(type: Enemy['type'], x: number, y: number, id: string): Enemy {
+  public createEnemy(type: Enemy['type'], x: number, y: number, id: string): Enemy {
     const isWarrior = type === 'demon_warrior';
     const isHeavy = type === 'heavy_demon';
     const isAgile = type === 'agile_demon';
@@ -1446,6 +1479,9 @@ export class GameEngine {
         if (rectsOverlap(enemy.activeHitbox.rect, playerRect)) {
           this.resolveEnemyHitOnPlayer(enemy, enemy.activeHitbox);
           enemy.activeHitbox = null; // Single hit
+          if (this.player.action === 'defeat') {
+            break;
+          }
         }
       }
     }
@@ -1532,6 +1568,13 @@ export class GameEngine {
 
       // Visual fanfare
       this.spawnParticleRing(p.x + p.facing * 18, p.y - p.height * 0.6, '#38bdf8', 25);
+      this.particles.push(
+        ...createParryImpactParticles({
+          impactX: p.x + p.facing * 18,
+          impactY: p.y - p.height * 0.6,
+          facing: p.facing,
+        })
+      );
       this.addDamageNumber(p.x, p.y - p.height - 15, 'PARRY!', '#38bdf8', true);
       return;
     }
@@ -1588,7 +1631,11 @@ export class GameEngine {
   private handlePlayerDeath(): void {
     this.player.action = 'defeat';
     this.player.actionTimer = 0;
+    this.activePlayerHitbox = null;
     audio.setMusicMode('none');
+
+    // Reset and respawn all enemies (and boss) when the protagonist dies
+    this.resetLevelEnemies();
 
     // Trigger dying dialogue with Yosuke hurt portrait: "¿Qué rayos...?"
     this.dialogueQueue = [];
@@ -1624,6 +1671,7 @@ export class GameEngine {
     if (boss.facing === undefined) boss.facing = -1;
     if (boss.isGrounded === undefined) boss.isGrounded = true;
     if (boss.underfootTimer === undefined) boss.underfootTimer = 0;
+    if (boss.moveCycleTimer === undefined) boss.moveCycleTimer = 0;
     if (boss.pendingAttackTimer === undefined) boss.pendingAttackTimer = 0;
 
     if (boss.phase !== 'scripted_defeat') {
@@ -1640,35 +1688,32 @@ export class GameEngine {
       if (absDx <= 165) {
         boss.underfootTimer += dt;
       } else {
-        boss.underfootTimer = Math.max(0, boss.underfootTimer - dt * 0.35);
+        boss.underfootTimer = 0;
       }
 
-      // 2. Every 5 seconds the protagonist stays underneath Malakor, trigger Abyssal Reposition Leap!
-      if (boss.underfootTimer >= 5.0 && boss.isGrounded) {
+      // 2. Trigger anti-camping leap if protagonist stays underneath Malakor for 10s
+      if (boss.underfootTimer >= 10.0 && boss.isGrounded) {
         boss.underfootTimer = 0;
         this.triggerBossUnderfootReposition();
       }
 
-      // 3. Continuous Boss Movement across the arena
+      // 3. 10-second ground movement cycle:
+      //    - [0.0s .. 5.0s): Slow movement (55 px/s) across the arena
+      //    - [5.0s .. 10.0s): Stays completely still (vx = 0) for 5 seconds, then moves again
       if (boss.isGrounded && boss.currentAttack !== 'leap_crush') {
-        const phaseSpeedMult = boss.phase === 3 ? 1.35 : boss.phase === 2 ? 1.18 : 1.0;
-        const baseMoveSpeed = 125 * diffCfg.speedMult * phaseSpeedMult;
-
-        if (boss.currentAttack === 'cleave' && boss.pendingAttackTimer > 0) {
-          // Lunging charge toward locked player position during Cleave windup
-          boss.vx = boss.facing * baseMoveSpeed * 2.1;
-        } else if (absDx > 260) {
-          // Stalk toward protagonist so he actively pursues across the entire arena
-          boss.vx = dirToPlayer * baseMoveSpeed;
-        } else if (absDx < 135) {
-          // Step back or strafe away to prevent trivial underfoot camping
-          const retreatDir: 1 | -1 =
-            boss.x > 1220 ? -1 : boss.x < 320 ? 1 : (-dirToPlayer as 1 | -1);
-          boss.vx = retreatDir * (baseMoveSpeed * 0.95);
+        boss.moveCycleTimer = (boss.moveCycleTimer + dt) % 10.0;
+        if (boss.moveCycleTimer < 5.0) {
+          const slowSpeed = 55 * diffCfg.speedMult;
+          if (absDx > 80) {
+            boss.vx = dirToPlayer * slowSpeed;
+            boss.facing = dirToPlayer;
+          } else {
+            const patrolDir: 1 | -1 = boss.x > 790 ? -1 : 1;
+            boss.vx = patrolDir * slowSpeed;
+            boss.facing = patrolDir;
+          }
         } else {
-          // Active combat weaving at mid-range
-          const weaveDir = Math.sin(this.stats.comboTimer * 3 + boss.actionTimer * 2.5) >= 0 ? 1 : -1;
-          boss.vx = weaveDir * (baseMoveSpeed * 0.65);
+          boss.vx = 0;
         }
       }
 
@@ -1831,42 +1876,42 @@ export class GameEngine {
     boss.vx = 0;
     boss.currentAttack = 'slam';
     boss.facing = p.x >= boss.x ? 1 : -1;
-    this.screenShakeRequest = 22;
+    this.screenShakeRequest = 18;
     audio.playShockwave();
     this.spawnParticleRing(boss.x, 610, '#f43f5e', 30);
 
-    // Direct landing crush check
-    if (Math.abs(p.x - boss.x) <= 145 && p.y >= 490 && !p.isInvulnerable) {
+    // Narrower landing crush check so stepping slightly aside avoids it
+    if (Math.abs(p.x - boss.x) <= 105 && p.y >= 510 && !p.isInvulnerable) {
       const pushDir = p.x >= boss.x ? 1 : -1;
-      this.damagePlayer(42, 'boss_leap_crush', { x: pushDir * 380, y: -250 });
+      this.damagePlayer(30, 'boss_leap_crush', { x: pushDir * 320, y: -220 });
     }
 
-    // Dual shockwaves radiating left and right from landing impact
+    // Slower, lower-profile linear shockwaves radiating left and right from landing impact
     boss.shockwaves.push(
       {
         id: `sw-leap-l-${Date.now()}`,
-        x: boss.x - 80,
-        y: 590,
-        vx: -380,
-        width: 48,
-        height: 35,
-        damage: 35,
+        x: boss.x - 70,
+        y: 598,
+        vx: -230,
+        width: 34,
+        height: 22,
+        damage: 24,
         duration: 3.5,
       },
       {
         id: `sw-leap-r-${Date.now()}`,
         x: boss.x + 35,
-        y: 590,
-        vx: 380,
-        width: 48,
-        height: 35,
-        damage: 35,
+        y: 598,
+        vx: 230,
+        width: 34,
+        height: 22,
+        damage: 24,
         duration: 3.5,
       }
     );
 
-    // Fire a directed abyssal orb right at Yosuke after landing
-    this.spawnDirectedBossOrb(boss.x, boss.y - 120, p.x, p.y - p.height * 0.5, 360, 30);
+    // Fire a slow, linear horizontal orb after landing
+    this.spawnDirectedBossOrb(boss.x, boss.y - 95, p.x, boss.y - 95, 210, 22);
   }
 
   private spawnDirectedBossOrb(
@@ -1877,20 +1922,24 @@ export class GameEngine {
     speed: number,
     damage: number
   ): void {
-    if (!this.boss) return;
+    if (!this.boss || this.player.action === 'defeat') return;
     const dx = targetX - startX;
     const dy = targetY - startY;
+    const dir: 1 | -1 = dx >= 0 ? 1 : -1;
     const dist = Math.max(1, Math.hypot(dx, dy));
+    // Keep orb trajectory strongly linear & horizontal so jumping or ducking easily avoids it
+    const vx = dir * speed;
+    const vy = Math.max(-55, Math.min(55, (dy / dist) * speed * 0.35));
     this.boss.projectiles.push({
       id: `orb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       x: startX,
       y: startY,
-      vx: (dx / dist) * speed,
-      vy: (dy / dist) * speed,
-      radius: 16,
+      vx,
+      vy,
+      radius: 12,
       damage,
       type: 'orb',
-      duration: 3.2,
+      duration: 3.4,
     });
   }
 
@@ -1902,8 +1951,21 @@ export class GameEngine {
     const diffCfg = getDifficultyConfig(this.difficulty);
     const dirToPlayer: 1 | -1 = p.x >= boss.x ? 1 : -1;
     boss.facing = dirToPlayer;
-    boss.attackTargetX = p.x;
-    boss.attackTargetY = p.y - p.height * 0.5;
+
+    // Increment attack counter; every 2nd attack intentionally miscalculates/overshoots aim
+    boss.attackCycleCount = (boss.attackCycleCount || 0) + 1;
+    const shouldMiss = boss.attackCycleCount % 2 === 0;
+    boss.lastAttackMissed = shouldMiss;
+
+    if (shouldMiss) {
+      // Deliberate aim error: aims high above Yosuke and overshoots horizontally
+      boss.attackTargetX = p.x + dirToPlayer * 145;
+      boss.attackTargetY = Math.max(380, p.y - p.height - 95);
+    } else {
+      // Lock target snapshot at windup start (no tracking during windup)
+      boss.attackTargetX = p.x;
+      boss.attackTargetY = p.y - p.height * 0.5;
+    }
 
     const attacks =
       boss.phase === 1
@@ -1912,7 +1974,6 @@ export class GameEngine {
         ? ['slam', 'cleave', 'meteor', 'beam']
         : ['slam', 'cleave', 'meteor', 'beam'];
 
-    // Prefer cleave when player is close, or ranged/slam when further
     const absDx = Math.abs(p.x - boss.x);
     let pick = attacks[Math.floor(Math.random() * attacks.length)];
     if (absDx < 190 && Math.random() < 0.55) {
@@ -1921,23 +1982,24 @@ export class GameEngine {
 
     boss.currentAttack = pick;
 
+    // Generous windup telegraphs & cooldowns so attacks are easy to read and dodge
     if (pick === 'slam') {
-      boss.actionTimer = 2.2 * diffCfg.cooldownMult;
-      boss.pendingAttackTimer = 0.45 * diffCfg.windupMult;
+      boss.actionTimer = 2.8 * diffCfg.cooldownMult;
+      boss.pendingAttackTimer = 0.60 * diffCfg.windupMult;
       audio.playBossRoar();
     } else if (pick === 'cleave') {
-      boss.actionTimer = 2.0 * diffCfg.cooldownMult;
-      boss.pendingAttackTimer = 0.38 * diffCfg.windupMult;
+      boss.actionTimer = 2.6 * diffCfg.cooldownMult;
+      boss.pendingAttackTimer = 0.55 * diffCfg.windupMult;
       audio.playSwordSwing('heavy');
     } else if (pick === 'meteor') {
-      boss.actionTimer = 2.8 * diffCfg.cooldownMult;
-      boss.pendingAttackTimer = 0.25 * diffCfg.windupMult;
+      boss.actionTimer = 3.2 * diffCfg.cooldownMult;
+      boss.pendingAttackTimer = 0.60 * diffCfg.windupMult;
       audio.playMeteor();
     } else if (pick === 'beam') {
-      boss.actionTimer = 2.5 * diffCfg.cooldownMult;
-      boss.pendingAttackTimer = 0.50 * diffCfg.windupMult;
+      boss.actionTimer = 3.0 * diffCfg.cooldownMult;
+      boss.pendingAttackTimer = 0.65 * diffCfg.windupMult;
       audio.playBeam();
-      this.screenShakeRequest = 14;
+      this.screenShakeRequest = 12;
     }
   }
 
@@ -1946,116 +2008,106 @@ export class GameEngine {
     if (!boss || boss.phase === 'scripted_defeat') return;
 
     const p = this.player;
-    const dir: 1 | -1 = p.x >= boss.x ? 1 : -1;
+    const targetX = boss.attackTargetX ?? p.x;
+    const targetY = boss.attackTargetY ?? p.y - p.height * 0.5;
+    const isMiss = Boolean(boss.lastAttackMissed);
+    const dir: 1 | -1 = targetX >= boss.x ? 1 : -1;
     boss.facing = dir;
 
     if (boss.currentAttack === 'slam') {
-      this.screenShakeRequest = 18;
+      this.screenShakeRequest = 14;
       audio.playShockwave();
 
-      // Crush anyone standing right underneath Malakor
-      if (Math.abs(p.x - boss.x) <= 135 && p.y >= 500 && !p.isInvulnerable) {
-        this.damagePlayer(38, 'boss_slam_crush', { x: dir * 320, y: -220 });
+      // Narrower underfoot crush check (and misses completely on inaccurate cycles)
+      if (!isMiss && Math.abs(p.x - boss.x) <= 90 && p.y >= 520 && !p.isInvulnerable) {
+        this.damagePlayer(30, 'boss_slam_crush', { x: dir * 280, y: -200 });
       }
 
-      // Primary shockwave directed toward protagonist
+      // Single linear forward shockwave at slower speed & low height (easy to jump over)
       boss.shockwaves.push({
         id: `sw-main-${Date.now()}`,
-        x: dir === 1 ? boss.x + 40 : boss.x - 85,
-        y: 590,
-        vx: dir * 380,
-        width: 48,
-        height: 35,
-        damage: 35,
+        x: dir === 1 ? boss.x + 40 : boss.x - 75,
+        y: 598,
+        vx: dir * 230,
+        width: 34,
+        height: 22,
+        damage: 24,
         duration: 3.5,
       });
-
-      // Secondary rear shockwave to prevent safe backside camping
-      boss.shockwaves.push({
-        id: `sw-rear-${Date.now()}`,
-        x: dir === 1 ? boss.x - 85 : boss.x + 40,
-        y: 590,
-        vx: -dir * 290,
-        width: 42,
-        height: 32,
-        damage: 30,
-        duration: 2.8,
-      });
     } else if (boss.currentAttack === 'cleave') {
-      this.screenShakeRequest = 14;
+      this.screenShakeRequest = 12;
       const playerRect: Rect = {
         x: p.x - p.width / 2,
         y: p.y - p.height,
         w: p.width,
         h: p.height,
       };
-      // Sweeps across Malakor's feet AND 230px toward the protagonist
+      // Compact linear horizontal slash in front of Malakor (swings high on miss cycles)
       const cleaveRect: Rect = {
-        x: dir === 1 ? boss.x - 80 : boss.x - 230,
-        y: Math.min(520, Math.max(410, p.y - 75)),
-        w: 310,
-        h: 100,
+        x: dir === 1 ? boss.x + 20 : boss.x - 200,
+        y: isMiss ? 420 : 545,
+        w: 180,
+        h: 60,
       };
       if (rectsOverlap(playerRect, cleaveRect) && !p.isInvulnerable) {
-        this.damagePlayer(40, 'boss_cleave', { x: dir * 350, y: -160 });
+        this.damagePlayer(30, 'boss_cleave', { x: dir * 300, y: -150 });
       }
-      // Also launch a directed abyssal slash orb toward protagonist
+      // Slow linear horizontal orb along the locked target height
+      const orbY = isMiss ? 435 : Math.max(460, Math.min(585, targetY));
       this.spawnDirectedBossOrb(
         boss.x + dir * 60,
-        boss.y - 110,
-        p.x,
-        p.y - p.height * 0.5,
-        390,
-        28
+        orbY,
+        targetX,
+        orbY,
+        210,
+        22
       );
     } else if (boss.currentAttack === 'meteor') {
-      // 4 Blood Meteors aimed directly at protagonist's current & predicted trajectory
-      const offsets = [-90, 0, 90, 180 * (p.vx >= 0 ? 1 : -1)];
-      for (let i = 0; i < 4; i++) {
-        const targetX = Math.max(120, Math.min(1400, p.x + p.vx * 0.25 + offsets[i]));
-        const spawnX = Math.max(100, Math.min(1420, targetX - (dir * 110)));
-        const spawnY = 40 + i * 28;
-        const dx = targetX - spawnX;
-        const dy = Math.max(200, p.y - spawnY);
-        const fallTime = dy / 340;
+      // 3 purely vertical linear meteors (vx = 0) with wide spacing so they are easy to sidestep
+      const columnOffsets = isMiss ? [-200, -95, 115] : [-160, 0, 160];
+      for (let i = 0; i < 3; i++) {
+        const dropX = Math.max(120, Math.min(1400, targetX + columnOffsets[i]));
         boss.projectiles.push({
           id: `meteor-${Date.now()}-${i}`,
-          x: spawnX,
-          y: spawnY,
-          vx: dx / fallTime,
-          vy: 340,
-          radius: 18,
-          damage: 30,
+          x: dropX,
+          y: 40 + i * 20,
+          vx: 0,
+          vy: 230,
+          radius: 14,
+          damage: 24,
           type: 'meteor',
-          duration: 3.2,
+          duration: 3.5,
         });
       }
     } else if (boss.currentAttack === 'beam') {
-      this.screenShakeRequest = 16;
-      const aimY = Math.max(390, Math.min(585, p.y - p.height * 0.5));
+      this.screenShakeRequest = 14;
+      const aimY = isMiss ? 435 : Math.max(390, Math.min(585, targetY));
       boss.projectiles.push({
         id: `beam-${Date.now()}`,
         x: boss.x + dir * 60,
         y: aimY,
         vx: 0,
         vy: 0,
-        radius: 24,
-        damage: 45,
+        radius: 14,
+        damage: 32,
         type: 'beam',
-        duration: 0.85,
+        duration: 0.50,
         dir,
-        beamWidth: 780,
+        beamWidth: 740,
       });
-      // Accompany beam with a directed orb aimed straight at Yosuke
+      // Slow linear horizontal orb traveling along the same axis
       this.spawnDirectedBossOrb(
         boss.x + dir * 50,
-        boss.y - 140,
-        p.x,
-        p.y - p.height * 0.5,
-        350,
-        30
+        aimY,
+        targetX,
+        aimY,
+        210,
+        22
       );
     }
+
+    boss.attackTargetX = undefined;
+    boss.attackTargetY = undefined;
   }
 
   // --- SCRIPTED PROLOGUE ENDING SEQUENCE ---

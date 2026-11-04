@@ -236,19 +236,19 @@ export const BESTIARY_ENTRIES: BestiaryEntry[] = [
     tacticalBehaviors: [
       {
         name: 'Abyssal Reposition Leap',
-        tag: '5s Anti-Camping Crush',
+        tag: '10s Underfoot Reposition',
         description:
-          'Actively stalks the arena and, if Yosuke stays underneath him for 5 seconds, detonates a repulsion blast and leaps across the sanctum with dual landing shockwaves.',
+          'Remains anchored until Yosuke stays underneath him for 10 consecutive seconds, then detonates a repulsion blast and leaps to the opposite side of the arena.',
       },
       {
         name: 'Directed Orbs, Meteors & Beam',
         tag: 'Targeted Barrage',
         description:
-          'Locks onto Yosuke’s position to launch predictive blood meteors, soul-fire orbs, lunging greatsword cleaves, and aimed abyssal laser beams.',
+          'Locks onto Yosuke’s position to launch predictive blood meteors, soul-fire orbs, greatsword cleaves, and aimed abyssal laser beams.',
       },
     ],
     counterStrategy:
-      'Never stay underneath Malakor for more than 5 seconds—watch the red charge ring at his feet, use elevated pillars to evade shockwaves, and punish his recovery windows.',
+      'Watch the red charge ring at Malakor’s feet—if you stay underneath him for 10 seconds he will leap across the sanctum and slam the ground with dual shockwaves.',
   },
 ];
 

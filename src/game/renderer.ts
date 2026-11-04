@@ -28,6 +28,7 @@ import { ashGhoulAtlas } from './ashGhoulSprites';
 import { oniWarriorAtlas } from './oniWarriorSprites';
 import { heavyDemonAtlas } from './heavyDemonSprites';
 import { agileDemonAtlas } from './agileDemonSprites';
+import { malakorAtlas } from './malakorSprites';
 
 export class GameRenderer {
   public cameraX: number = 0;
@@ -847,12 +848,8 @@ export class GameRenderer {
     // 1. Render Boss Body in Local (Facing-Aware) Coordinates
     ctx.save();
     ctx.translate(Math.round(boss.x), Math.round(boss.y));
-    // Native boss procedural art faces left (-1); flip horizontally when facing right (+1)
-    if (boss.facing === 1) {
-      ctx.scale(-1, 1);
-    }
 
-    // Underfoot anti-camping charge warning ring when player stays underneath him
+    // Underfoot anti-camping charge warning ring when player stays underneath him (5s timer)
     if ((boss.underfootTimer || 0) > 1.0 && boss.phase !== 'scripted_defeat') {
       const chargeRatio = Math.min(1, (boss.underfootTimer || 0) / 5.0);
       ctx.save();
@@ -864,67 +861,90 @@ export class GameRenderer {
       ctx.restore();
     }
 
-    // Colossal Torso & Abyssal Core
-    const torso = bossAtlas.torsoSprite;
-    if (torso && torso.canvas) {
+    const malakorFrame = malakorAtlas.getFrame(
+      boss.currentAttack,
+      boss.isGrounded !== false,
+      boss.vx || 0,
+      boss.vy || 0,
+      boss.pendingAttackTimer || 0,
+      boss.hitFlashTimer || 0,
+      this.globalTime
+    );
+
+    if (malakorFrame && malakorFrame.canvas) {
+      // boss_final_4_2f289ee0.jpg sprites natively face RIGHT (+1)
+      const facingDir = boss.facing || -1;
+      ctx.scale(facingDir, 1);
       ctx.drawImage(
-        torso.canvas,
-        Math.round(-torso.originX),
-        Math.round(-torso.originY + breath)
+        malakorFrame.canvas,
+        Math.round(-malakorFrame.originX),
+        Math.round(-malakorFrame.originY)
       );
-    }
-
-    // Head & Ram Horns
-    const head = bossAtlas.headSprite;
-    if (head && head.canvas) {
-      ctx.drawImage(
-        head.canvas,
-        Math.round(-head.originX),
-        Math.round(-head.originY - 110 + breath)
-      );
-    }
-
-    // Blazing eye trails (embers dripping)
-    for (let e = 0; e < 3; e++) {
-      const ey = -210 + breath + ((this.globalTime * 35 + e * 18) % 40);
-      ctx.fillStyle = isPhase3 ? '#f43f5e' : '#dc2626';
-      ctx.fillRect(Math.round(-18 + (e % 2) * 32), Math.round(ey), 3, 3);
-    }
-
-    // Attack Visuals (Slam fist / Greatsword / Leap Crush)
-    if (boss.currentAttack === 'slam' || boss.currentAttack === 'leap_crush') {
-      // Massive fist smash
-      ctx.fillStyle = PALETTE.bossObsidianDark;
-      ctx.fillRect(-140, -150 + breath, 55, 150);
-      ctx.fillStyle = PALETTE.bossRuneDark;
-      ctx.fillRect(-160, -20, 95, 28);
-    } else if (boss.currentAttack === 'cleave' || boss.phase === 'scripted_defeat') {
-      // Greatsword of Cataclysm
-      ctx.strokeStyle = PALETTE.bossRuneDark;
-      ctx.lineWidth = 16;
-      ctx.beginPath();
-      ctx.moveTo(50, -170);
-      ctx.lineTo(-200, -20);
-      ctx.stroke();
-
-      ctx.strokeStyle = PALETTE.bossRuneLight;
-      ctx.lineWidth = 8;
-      ctx.beginPath();
-      ctx.moveTo(45, -170);
-      ctx.lineTo(-195, -20);
-      ctx.stroke();
-
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(40, -170);
-      ctx.lineTo(-190, -20);
-      ctx.stroke();
     } else {
-      // Resting / Striding arms
-      ctx.fillStyle = PALETTE.bossObsidianDark;
-      ctx.fillRect(-125, -190 + breath, 45, 150);
-      ctx.fillRect(80, -190 - breath * 0.5, 45, 150);
+      // Native boss procedural art faces left (-1); flip horizontally when facing right (+1)
+      if (boss.facing === 1) {
+        ctx.scale(-1, 1);
+      }
+
+      // Colossal Torso & Abyssal Core
+      const torso = bossAtlas.torsoSprite;
+      if (torso && torso.canvas) {
+        ctx.drawImage(
+          torso.canvas,
+          Math.round(-torso.originX),
+          Math.round(-torso.originY + breath)
+        );
+      }
+
+      // Head & Ram Horns
+      const head = bossAtlas.headSprite;
+      if (head && head.canvas) {
+        ctx.drawImage(
+          head.canvas,
+          Math.round(-head.originX),
+          Math.round(-head.originY - 110 + breath)
+        );
+      }
+
+      // Blazing eye trails (embers dripping)
+      for (let e = 0; e < 3; e++) {
+        const ey = -210 + breath + ((this.globalTime * 35 + e * 18) % 40);
+        ctx.fillStyle = isPhase3 ? '#f43f5e' : '#dc2626';
+        ctx.fillRect(Math.round(-18 + (e % 2) * 32), Math.round(ey), 3, 3);
+      }
+
+      // Attack Visuals (Slam fist / Greatsword / Leap Crush)
+      if (boss.currentAttack === 'slam' || boss.currentAttack === 'leap_crush') {
+        ctx.fillStyle = PALETTE.bossObsidianDark;
+        ctx.fillRect(-140, -150 + breath, 55, 150);
+        ctx.fillStyle = PALETTE.bossRuneDark;
+        ctx.fillRect(-160, -20, 95, 28);
+      } else if (boss.currentAttack === 'cleave' || boss.phase === 'scripted_defeat') {
+        ctx.strokeStyle = PALETTE.bossRuneDark;
+        ctx.lineWidth = 16;
+        ctx.beginPath();
+        ctx.moveTo(50, -170);
+        ctx.lineTo(-200, -20);
+        ctx.stroke();
+
+        ctx.strokeStyle = PALETTE.bossRuneLight;
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.moveTo(45, -170);
+        ctx.lineTo(-195, -20);
+        ctx.stroke();
+
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(40, -170);
+        ctx.lineTo(-190, -20);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = PALETTE.bossObsidianDark;
+        ctx.fillRect(-125, -190 + breath, 45, 150);
+        ctx.fillRect(80, -190 - breath * 0.5, 45, 150);
+      }
     }
     ctx.restore();
 
@@ -952,7 +972,7 @@ export class GameRenderer {
         // Directed Abyssal Soul-Fire Orb
         ctx.fillStyle = 'rgba(225, 29, 72, 0.35)';
         ctx.beginPath();
-        ctx.arc(px, py, p.radius + 6, 0, Math.PI * 2);
+        ctx.arc(px, py, p.radius + 5, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.fillStyle = '#f43f5e';
@@ -965,14 +985,15 @@ export class GameRenderer {
         ctx.arc(px, py, Math.max(4, Math.round(p.radius * 0.45)), 0, Math.PI * 2);
         ctx.fill();
       } else if (p.type === 'beam') {
-        // Aimed Abyssal Beam in direction of protagonist
-        const bWidth = p.beamWidth || 780;
+        // Aimed Linear Abyssal Beam in direction of protagonist
+        const bWidth = p.beamWidth || 740;
         const bDir = p.dir || -1;
         const startX = bDir === 1 ? px : px - bWidth;
-        ctx.fillStyle = 'rgba(168, 85, 247, 0.95)';
-        ctx.fillRect(startX, py - 18, bWidth, 36);
+        const halfH = Math.max(10, p.radius);
+        ctx.fillStyle = 'rgba(168, 85, 247, 0.92)';
+        ctx.fillRect(startX, py - halfH, bWidth, halfH * 2);
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(startX, py - 6, bWidth, 12);
+        ctx.fillRect(startX, py - 5, bWidth, 10);
       }
     }
     ctx.restore();

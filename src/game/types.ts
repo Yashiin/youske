@@ -121,10 +121,13 @@ export interface BossData {
   facing?: 1 | -1;
   isGrounded?: boolean;
   underfootTimer?: number;
+  moveCycleTimer?: number;
   moveTargetX?: number;
   pendingAttackTimer?: number;
   attackTargetX?: number;
   attackTargetY?: number;
+  attackCycleCount?: number;
+  lastAttackMissed?: boolean;
   actionTimer: number;
   currentAttack: string;
   hitFlashTimer: number;
@@ -171,9 +174,11 @@ export interface Particle {
   size: number;
   color: string;
   alpha: number;
-  shape: 'circle' | 'square' | 'line' | 'spark' | 'ember' | 'smoke';
+  shape: 'circle' | 'square' | 'line' | 'spark' | 'ember' | 'smoke' | 'blood' | 'soul';
   angle?: number;
   length?: number;
+  gravity?: number;
+  drag?: number;
 }
 
 export interface DamageNumber {

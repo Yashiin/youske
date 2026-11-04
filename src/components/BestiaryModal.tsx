@@ -12,6 +12,7 @@ import { ashGhoulAtlas } from '../game/ashGhoulSprites';
 import { oniWarriorAtlas } from '../game/oniWarriorSprites';
 import { agileDemonAtlas } from '../game/agileDemonSprites';
 import { heavyDemonAtlas } from '../game/heavyDemonSprites';
+import { malakorAtlas } from '../game/malakorSprites';
 import { bossAtlas, enemyAtlas, PALETTE } from '../game/pixelArt';
 
 interface BestiaryModalProps {
@@ -109,35 +110,64 @@ export const BestiaryModal: React.FC<BestiaryModalProps> = ({
           ctx.translate(centerX, floorY);
 
           if (selectedEntry.id === 'boss_malakor') {
-            // Scale down colossal boss to fit cleanly inside preview stage
-            const bossScale = 0.68;
-            ctx.scale(bossScale, bossScale);
-            const breath = Math.sin(elapsed * 3) * 3;
+            const bossAttackMap: Record<BestiaryPreviewAction, string> = {
+              idle: 'idle',
+              patrol: 'idle',
+              chase: 'idle',
+              windup: 'cleave',
+              attack: 'cleave',
+              hurt: 'hurt',
+              dead: 'defeat',
+            };
+            const mappedAttack = bossAttackMap[previewAction] || 'idle';
+            const simVx = previewAction === 'chase' || previewAction === 'patrol' ? 125 : 0;
+            const simPending = previewAction === 'windup' ? 0.35 : 0;
+            const malakorFrame = malakorAtlas.getFrame(
+              mappedAttack,
+              true,
+              simVx,
+              0,
+              simPending,
+              0,
+              elapsed
+            );
 
-            const torso = bossAtlas.torsoSprite;
-            if (torso && torso.canvas) {
+            if (malakorFrame && malakorFrame.canvas) {
+              const previewScale = 0.72;
+              ctx.scale(previewScale, previewScale);
               ctx.drawImage(
-                torso.canvas,
-                Math.round(-torso.originX),
-                Math.round(-torso.originY + breath)
+                malakorFrame.canvas,
+                Math.round(-malakorFrame.originX),
+                Math.round(-malakorFrame.originY)
               );
-            }
-            const head = bossAtlas.headSprite;
-            if (head && head.canvas) {
-              ctx.drawImage(
-                head.canvas,
-                Math.round(-head.originX),
-                Math.round(-head.originY - 110 + breath)
-              );
-            }
-
-            if (previewAction === 'attack' || previewAction === 'windup') {
-              ctx.strokeStyle = PALETTE.bossRuneDark;
-              ctx.lineWidth = 14;
-              ctx.beginPath();
-              ctx.moveTo(40, -160 + breath);
-              ctx.lineTo(-150, -20);
-              ctx.stroke();
+            } else {
+              const bossScale = 0.68;
+              ctx.scale(bossScale, bossScale);
+              const breath = Math.sin(elapsed * 3) * 3;
+              const torso = bossAtlas.torsoSprite;
+              if (torso && torso.canvas) {
+                ctx.drawImage(
+                  torso.canvas,
+                  Math.round(-torso.originX),
+                  Math.round(-torso.originY + breath)
+                );
+              }
+              const head = bossAtlas.headSprite;
+              if (head && head.canvas) {
+                ctx.drawImage(
+                  head.canvas,
+                  Math.round(-head.originX),
+                  Math.round(-head.originY - 110 + breath)
+                );
+              }
+              if (previewAction === 'attack' || previewAction === 'windup') {
+                ctx.strokeStyle = PALETTE.bossRuneDark;
+                ctx.lineWidth = 14;
+                ctx.beginPath();
+                ctx.moveTo(40, -160 + breath);
+                ctx.lineTo(-150, -20);
+                ctx.stroke();
+              }
             }
           } else {
             // Standard & Elite Demons rendered at 1.65x zoom for crisp pixel inspection

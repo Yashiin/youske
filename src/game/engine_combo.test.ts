@@ -231,3 +231,65 @@ test('Stage 3 Final Boss battle activates boss music mode with Final_Boss_Battle
   engine.startGame(2, 'normal');
   assert.equal(audio.getMusicMode(), 'boss');
 });
+
+test('when protagonist dies and respawns, all level enemies (and boss) reset and reappear at full health', () => {
+  const engine = new GameEngine();
+  engine.startGame(0, 'hard');
+  engine.skipDialogue();
+
+  const initialEnemyCount = engine.enemies.length;
+  const initialFirstEnemyX = engine.enemies[0].x;
+  const initialFirstEnemyMaxHp = engine.enemies[0].maxHp;
+  assert.ok(initialEnemyCount > 0);
+
+  // Activate a checkpoint so we also verify checkpoint preservation
+  const cp = engine.level.checkpoints[0];
+  cp.activated = true;
+
+  // Kill the first two enemies (remove one, mark one dead) and damage the third
+  engine.enemies.splice(0, 1);
+  engine.enemies[0].hp = 0;
+  engine.enemies[0].state = 'dead';
+  engine.enemies[1].hp = 5;
+  engine.enemies[1].x += 250;
+  assert.equal(engine.enemies.length, initialEnemyCount - 1);
+
+  // Protagonist takes fatal damage and dies
+  engine.player.isInvulnerable = false;
+  engine.damagePlayer(9999, 'enemy');
+  assert.equal(engine.player.action, 'defeat');
+
+  // Immediately upon death, enemies have been reset and respawned
+  assert.equal(engine.enemies.length, initialEnemyCount);
+  assert.equal(engine.enemies[0].x, initialFirstEnemyX);
+  assert.equal(engine.enemies[0].hp, initialFirstEnemyMaxHp);
+  assert.ok(engine.enemies.every((e) => e.state === 'patrol' && e.hp === e.maxHp));
+
+  // Respawn at checkpoint after Game Over
+  engine.respawnAtCheckpoint();
+  assert.equal(engine.state, 'playing');
+  assert.equal(engine.player.x, cp.x);
+  assert.equal(engine.player.y, cp.y);
+  assert.equal(engine.stats.hp, engine.stats.maxHp);
+  assert.equal(engine.enemies.length, initialEnemyCount);
+  assert.ok(engine.enemies.every((e) => e.state === 'patrol' && e.hp === e.maxHp));
+
+  // Also verify boss stage reset on player death & respawn
+  engine.startGame(2, 'normal');
+  engine.skipDialogue();
+  assert.ok(engine.boss);
+  engine.boss.hp = 300;
+  engine.boss.phase = 2;
+  engine.boss.x = 640;
+  engine.enemies.push(engine.createEnemy('agile_demon', 700, 620, 'minion-test'));
+
+  engine.player.isInvulnerable = false;
+  engine.damagePlayer(9999, 'boss_cleave');
+  engine.respawnAtCheckpoint();
+
+  assert.equal(engine.boss?.hp, engine.boss?.maxHp);
+  assert.equal(engine.boss?.phase, 1);
+  assert.equal(engine.boss?.x, 1150);
+  assert.equal(engine.enemies.length, 0);
+});
+
